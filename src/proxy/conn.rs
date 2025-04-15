@@ -9,8 +9,8 @@ use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use worker::*;
 
-static MAX_WEBSOCKET_SIZE: usize = 512 * 1024; // 512kb
-static MAX_BUFFER_SIZE: usize = 4 * 1024 * 1024; // 4Mb
+static MAX_WEBSOCKET_SIZE: usize = 64 * 1024; // 64kb
+static MAX_BUFFER_SIZE: usize = 512 * 1024; // 512kb
 
 pin_project! {
     pub struct ProxyStream<'a> {
@@ -24,7 +24,7 @@ pin_project! {
 
 impl<'a> ProxyStream<'a> {
     pub fn new(config: Config, ws: &'a WebSocket, events: EventStream<'a>) -> Self {
-        let buffer = BytesMut::new();
+        let buffer = BytesMut::with_capacity(MAX_BUFFER_SIZE);
 
         Self {
             config,
@@ -74,7 +74,7 @@ impl<'a> ProxyStream<'a> {
         } else if peeked_buffer[0] == 1 || peeked_buffer[0] == 3 {
             console_log!("Shadowsocks detected!");
             self.process_shadowsocks().await
-        } else if peeked_buffer[56] == 13 && peeked_buffer[57] == 10 {
+        } else if peeked_buffer.len() > 57 && peeked_buffer[56] == 13 && peeked_buffer[57] == 10 {
             console_log!("Trojan detected!");
             self.process_trojan().await
         } else {
