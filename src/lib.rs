@@ -24,7 +24,7 @@ async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
     let host = req.url()?.host().map(|x| x.to_string()).unwrap_or_default();
     let main_page_url = env.var("MAIN_PAGE_URL").map(|x|x.to_string()).unwrap();
     let sub_page_url = env.var("SUB_PAGE_URL").map(|x|x.to_string()).unwrap();
-    let config = Config { uuid, host: host.clone(), proxy_addr: host, proxy_port: 443, main_page_url, sub_page_url};
+    let config = Config { uuid, host: host.clone(), proxy_addr: host, proxy_port: 443, main_page_url, sub_page_url };
 
     Router::with_data(config)
         .on_async("/", fe)
