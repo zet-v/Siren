@@ -171,6 +171,13 @@ impl<'a> AsyncWrite for ProxyStream<'a> {
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
-        unimplemented!()
+        match self.ws.close(Some(1000), Some("shutdown".to_string())) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(e) => Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))),
+        }
     }
+    
 }
