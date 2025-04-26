@@ -69,22 +69,70 @@ impl<'a> ProxyStream<'a> {
         let peeked_buffer = self.peek_buffer(peek_buffer_len);
 
         if peeked_buffer.len() < (peek_buffer_len/2) {
-            return Err(worker::Error::RustError("not enough buffer".to_string()));
+            return Err(Error::RustError("not enough buffer".to_string()));
         }
 
-        if peeked_buffer[0] == 0 {
+        if self.is_vless(peeked_buffer) {
             console_log!("vless detected!");
             self.process_vless().await
-        } else if peeked_buffer[0] == 1 || peeked_buffer[0] == 3 {
+        } else if self.is_shadowsocks(peeked_buffer) {
             console_log!("shadowsocks detected!");
             self.process_shadowsocks().await
-        } else if peeked_buffer.len() > 57 && peeked_buffer[56] == 13 && peeked_buffer[57] == 10 {
+        } else if self.is_trojan(peeked_buffer) {
             console_log!("trojan detected!");
             self.process_trojan().await
-        } else {
+        } else if self.is_vmess(peeked_buffer) {
             console_log!("vmess detected!");
             self.process_vmess().await
+        } else {
+            Err(Error::RustError("protocol not implemented".to_string()))
         }
+    }
+
+    pub fn is_vless(&self, buffer: &[u8]) -> bool {
+        buffer[0] == 0
+    }
+
+    fn is_shadowsocks(&self, buffer: &[u8]) -> bool {
+        match buffer[0] {
+            1 => { // IPv4
+                if buffer.len() < 7 {
+                    return false;
+                }
+                let remote_port = u16::from_be_bytes([buffer[5], buffer[6]]);
+                remote_port != 0
+            }
+            3 => { // Domain name
+                if buffer.len() < 2 {
+                    return false;
+                }
+                let domain_len = buffer[1] as usize;
+                if buffer.len() < 2 + domain_len + 2 {
+                    return false;
+                }
+                let remote_port = u16::from_be_bytes([
+                    buffer[2 + domain_len],
+                    buffer[2 + domain_len + 1],
+                ]);
+                remote_port != 0
+            }
+            4 => { // IPv6
+                if buffer.len() < 19 {
+                    return false;
+                }
+                let remote_port = u16::from_be_bytes([buffer[17], buffer[18]]);
+                remote_port != 0
+            }
+            _ => false,
+        }
+    }
+
+    fn is_trojan(&self, buffer: &[u8]) -> bool {
+        buffer.len() > 57 && buffer[56] == 13 && buffer[57] == 10
+    }
+
+    fn is_vmess(&self, buffer: &[u8]) -> bool {
+        buffer.len() > 0 // fallback
     }
 
     pub async fn handle_tcp_outbound(&mut self, addr: String, port: u16) -> Result<()> {
@@ -99,7 +147,7 @@ impl<'a> ProxyStream<'a> {
         tokio::io::copy_bidirectional(self, &mut remote_socket)
             .await
             .map(|(a_to_b, b_to_a)| {
-                console_log!("copied data from {}, up: {} and dl: {}", &addr, convert(a_to_b as f64), convert(b_to_a as f64));
+                console_log!("copied data from {}:{}, up: {} and dl: {}", &addr, &port, convert(a_to_b as f64), convert(b_to_a as f64));
             })
             .map_err(|e| {
                 Error::RustError(e.to_string())

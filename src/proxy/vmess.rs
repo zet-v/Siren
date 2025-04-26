@@ -1,11 +1,6 @@
 use super::ProxyStream;
-
 use crate::common::{
-    hash, KDFSALT_CONST_AEAD_RESP_HEADER_IV, KDFSALT_CONST_AEAD_RESP_HEADER_KEY,
-    KDFSALT_CONST_AEAD_RESP_HEADER_LEN_IV, KDFSALT_CONST_AEAD_RESP_HEADER_LEN_KEY,
-    KDFSALT_CONST_VMESS_HEADER_PAYLOAD_AEAD_IV, KDFSALT_CONST_VMESS_HEADER_PAYLOAD_AEAD_KEY,
-    KDFSALT_CONST_VMESS_HEADER_PAYLOAD_LENGTH_AEAD_IV,
-    KDFSALT_CONST_VMESS_HEADER_PAYLOAD_LENGTH_AEAD_KEY,
+    hash, parse_port, parse_addr, KDFSALT_CONST_AEAD_RESP_HEADER_IV, KDFSALT_CONST_AEAD_RESP_HEADER_KEY, KDFSALT_CONST_AEAD_RESP_HEADER_LEN_IV, KDFSALT_CONST_AEAD_RESP_HEADER_LEN_KEY, KDFSALT_CONST_VMESS_HEADER_PAYLOAD_AEAD_IV, KDFSALT_CONST_VMESS_HEADER_PAYLOAD_AEAD_KEY, KDFSALT_CONST_VMESS_HEADER_PAYLOAD_LENGTH_AEAD_IV, KDFSALT_CONST_VMESS_HEADER_PAYLOAD_LENGTH_AEAD_KEY
 };
 use std::io::Cursor;
 use aes::cipher::KeyInit;
@@ -128,12 +123,8 @@ impl <'a> ProxyStream<'a> {
         let cmd = buf.read_u8().await?;
         let is_tcp = cmd == 0x1;
 
-        let remote_port = {
-            let mut port = [0u8; 2];
-            buf.read_exact(&mut port).await?;
-            ((port[0] as u16) << 8) | (port[1] as u16)
-        };
-        let remote_addr = crate::common::parse_addr(&mut buf).await?;
+        let remote_port = parse_port(&mut buf).await?;
+        let remote_addr = parse_addr(&mut buf).await?;
 
         // encrypt payload
         let key = &crate::sha256!(&key)[..16];

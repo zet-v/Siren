@@ -60,14 +60,14 @@ pub async fn parse_addr<R: AsyncRead + std::marker::Unpin>(buf: &mut R) -> Resul
             let mut addr = [0u8; 16];
             buf.read_exact(&mut addr).await?;
             Ipv6Addr::new(
-                ((addr[0] as u16) << 16) | (addr[1] as u16),
-                ((addr[2] as u16) << 16) | (addr[3] as u16),
-                ((addr[4] as u16) << 16) | (addr[5] as u16),
-                ((addr[6] as u16) << 16) | (addr[7] as u16),
-                ((addr[8] as u16) << 16) | (addr[9] as u16),
-                ((addr[10] as u16) << 16) | (addr[11] as u16),
-                ((addr[12] as u16) << 16) | (addr[13] as u16),
-                ((addr[14] as u16) << 16) | (addr[15] as u16),
+                u16::from_be_bytes([addr[0], addr[1]]),
+                u16::from_be_bytes([addr[2], addr[3]]),
+                u16::from_be_bytes([addr[4], addr[5]]),
+                u16::from_be_bytes([addr[6], addr[7]]),
+                u16::from_be_bytes([addr[8], addr[9]]),
+                u16::from_be_bytes([addr[10], addr[11]]),
+                u16::from_be_bytes([addr[12], addr[13]]),
+                u16::from_be_bytes([addr[14], addr[15]]),
             )
             .to_string()
         }
@@ -77,4 +77,11 @@ pub async fn parse_addr<R: AsyncRead + std::marker::Unpin>(buf: &mut R) -> Resul
     };
 
     Ok(addr)
+}
+
+pub async fn parse_port<R: AsyncRead + std::marker::Unpin>(buf: &mut R) -> Result<u16> {
+    let mut port = [0u8; 2];
+    buf.read_exact(&mut port).await?;
+
+    Ok(u16::from_be_bytes([port[0], port[1]]))
 }
