@@ -8,7 +8,7 @@ binding = "SIREN"
 id = "bc99493fbd1f40fcbe0016ff8ed13ff4"
 
 [build]
-command = "cargo install worker-build && worker-build --release"
+command = "cargo install worker-build && worker-build --release --enable-bulk-memory"
 
 [env.dev]
 build = { command = "cargo install worker-build && worker-build --dev" }
