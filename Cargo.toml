@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = true
+wasm-opt = true 
 
 [package.metadata.wasm-pack.profile.dev]
-wasm-opt = true
+wasm-opt = true 
 
 
 [lib]
@@ -18,7 +18,7 @@ tokio = { version = "1.28", features = ["io-util", "rt"] }
 serde_json = "1.0"
 base64 = "0.22"
 getrandom = { version = "0.2", features = ["js"] }
-worker = "0.5.0"
+worker = "0.8.5"
 futures-util = "0.3.28"
 pin-project-lite = "0.2"
 uuid = "1.8.0"
