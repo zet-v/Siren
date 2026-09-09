@@ -17,6 +17,14 @@ class_name = "Stats"
 tag = "v1"
 new_classes = ["Stats"]
 
+[[routes]]
+pattern = "siren.mendutmendut.web.id"
+custom_domain = true
+
+[[routes]]
+pattern = "investors.spotify.com.siren.mendutmendut.web.id"
+custom_domain = true
+
 [vars]
 UUID = "7e8fa1ce-47ef-4445-bcad-7470c63fbda1"
 PROXYIP = "https://raw.githubusercontent.com/zx-vm/proxyip/refs/heads/main/proxyip.txt"
