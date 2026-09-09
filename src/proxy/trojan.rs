@@ -24,16 +24,8 @@ impl <'a> ProxyStream<'a> {
         self.read_u16().await?;
 
         if is_tcp {
-            let addr_pool = [
-                (remote_addr.clone(), remote_port),
-                (self.config.proxy_addr.clone(), self.config.proxy_port)
-            ];
-
-            // send header
-            for (target_addr, target_port) in addr_pool {
-                if let Err(e) = self.handle_tcp_outbound(target_addr, target_port).await {
-                    console_error!("error handling tcp: {}", e)
-                }
+            if let Err(e) = self.handle_tcp_outbound(remote_addr, remote_port).await {
+                console_error!("error handling tcp: {}", e)
             }
         } else {
             if let Err(e) = self.handle_udp_outbound().await {
