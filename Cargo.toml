@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+wasm-opt = true
 
 [package.metadata.wasm-pack.profile.dev]
-wasm-opt = false
+wasm-opt = true
 
 
 [lib]
@@ -29,8 +29,6 @@ sha2 = "0.10"
 md-5 = "0.10"
 anyhow = "1.0.86"
 reqwest = "0.12.5"
-regex = "1.11.1"
-once_cell = "1.21.3"
 pretty-bytes = "0.2.2"
 
 
