@@ -11,7 +11,7 @@ impl DurableObject for Stats {
         Self { state }
     }
 
-    async fn fetch(&mut self, req: Request) -> Result<Response> {
+    async fn fetch(&self, req: Request) -> Result<Response> {
         let url = req.url()?;
 
         match url.path() {
@@ -23,8 +23,8 @@ impl DurableObject for Stats {
 }
 
 impl Stats {
-    async fn get_stats(&mut self) -> Result<Response> {
-        let mut storage = self.state.storage();
+    async fn get_stats(&self) -> Result<Response> {
+        let storage = self.state.storage();
 
         let first_seen: u64 = match storage.get::<u64>("first_seen").await {
             Ok(v) => v,
@@ -51,7 +51,7 @@ impl Stats {
         Response::from_body(ResponseBody::Body(body.into()))
     }
 
-    async fn report(&mut self, url: &Url) -> Result<Response> {
+    async fn report(&self, url: &Url) -> Result<Response> {
         let mut up: u64 = 0;
         let mut down: u64 = 0;
         for (key, value) in url.query_pairs() {
@@ -62,7 +62,7 @@ impl Stats {
             }
         }
 
-        let mut storage = self.state.storage();
+        let storage = self.state.storage();
         let up_bytes: u64 = storage.get::<u64>("up_bytes").await.unwrap_or(0);
         let down_bytes: u64 = storage.get::<u64>("down_bytes").await.unwrap_or(0);
 
