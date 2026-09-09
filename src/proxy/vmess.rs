@@ -137,7 +137,6 @@ impl <'a> ProxyStream<'a> {
             // 4 bytes header: https://github.com/v2ray/v2ray-core/blob/master/proxy/vmess/encoding/client.go#L238
             .encrypt(length_iv.into(), &4u16.to_be_bytes()[..])
             .map_err(|e| Error::RustError(e.to_string()))?;
-        self.write(&length).await?;
 
         let payload_key = &hash::kdf(&key, &[KDFSALT_CONST_AEAD_RESP_HEADER_KEY])[..16];
         let payload_iv = &hash::kdf(&iv, &[KDFSALT_CONST_AEAD_RESP_HEADER_IV])[..12];
@@ -150,18 +149,15 @@ impl <'a> ProxyStream<'a> {
                 .encrypt(payload_iv.into(), &header[..])
                 .map_err(|e| Error::RustError(e.to_string()))?
         };
-        self.write(&header).await?;
+
+        let mut response_header = Vec::with_capacity(length.len() + header.len());
+        response_header.extend_from_slice(&length);
+        response_header.extend_from_slice(&header);
+        self.write(&response_header).await?;
 
         if is_tcp {
-            let addr_pool = [
-                (remote_addr.clone(), remote_port),
-                (self.config.proxy_addr.clone(), self.config.proxy_port)
-            ];
-
-            for (target_addr, target_port) in addr_pool {
-                if let Err(e) = self.handle_tcp_outbound(target_addr, target_port).await {
-                    console_error!("error handling tcp: {}", e)
-                }
+            if let Err(e) = self.handle_tcp_outbound(remote_addr, remote_port).await {
+                console_error!("error handling tcp: {}", e)
             }
         } else {
             if let Err(e) = self.handle_udp_outbound().await {
