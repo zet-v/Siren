@@ -1,20 +1,15 @@
 mod common;
 mod config;
 mod proxy;
+mod stats;
 
-use crate::config::Config;
+use crate::config::{parse_proxyip_pool, pick_sticky, Config, Protocol, ProxyEntry, ProxyType};
 use crate::proxy::*;
 
-use std::collections::HashMap;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use serde_json::json;
 use uuid::Uuid;
 use worker::*;
-use once_cell::sync::Lazy;
-use regex::Regex;
-
-static PROXYIP_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^.+-\d+$").unwrap());
-static PROXYKV_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([A-Z]{2})").unwrap());
 
 #[event(fetch)]
 async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
@@ -24,13 +19,31 @@ async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
     let host = req.url()?.host().map(|x| x.to_string()).unwrap_or_default();
     let main_page_url = env.var("MAIN_PAGE_URL").map(|x|x.to_string()).unwrap();
     let sub_page_url = env.var("SUB_PAGE_URL").map(|x|x.to_string()).unwrap();
-    let config = Config { uuid, host: host.clone(), proxy_addr: host, proxy_port: 443, main_page_url, sub_page_url };
+
+    let default_proxyip = env.var("PROXYIP").map(|x| x.to_string()).unwrap_or_default();
+    let proxy_pool = parse_proxyip_pool(&default_proxyip);
+
+    let config = Config {
+        uuid,
+        host: host.clone(),
+        proxy_addr: String::new(),
+        proxy_port: 0,
+        proxy_type: ProxyType::Direct,
+        proxy_credentials: None,
+        proxy_pool,
+        env: env.clone(),
+        main_page_url,
+        sub_page_url,
+    };
 
     Router::with_data(config)
         .on_async("/", fe)
         .on_async("/sub", sub)
         .on("/link", link)
-        .on_async("/:proxyip", tunnel)
+        .on_async("/api/stats", stats)
+        .on_async("/vless", tunnel_vless)
+        .on_async("/vmess", tunnel_vmess)
+        .on_async("/trojan", tunnel_trojan)
         .run(req, env)
         .await
 }
@@ -49,54 +62,51 @@ async fn sub(_: Request, cx: RouteContext<Config>) -> Result<Response> {
     get_response_from_url(cx.data.sub_page_url).await
 }
 
+async fn stats(_: Request, cx: RouteContext<Config>) -> Result<Response> {
+    let namespace = cx.data.env.durable_object("DurableObject")?;
+    let id = namespace.id_from_name("global")?;
+    let stub = id.get_stub()?;
+    stub.fetch_with_str("https://do/stats").await
+}
 
-async fn tunnel(req: Request, mut cx: RouteContext<Config>) -> Result<Response> {
-    let mut proxyip = cx.param("proxyip").unwrap().to_string();
-    if PROXYKV_PATTERN.is_match(&proxyip)  {
-        let kvid_list: Vec<String> = proxyip.split(",").map(|s|s.to_string()).collect();
-        let kv = cx.kv("SIREN")?;
-        let mut proxy_kv_str = kv.get("proxy_kv").text().await?.unwrap_or("".to_string());
-        let mut rand_buf = [0u8, 1];
-        getrandom::getrandom(&mut rand_buf).expect("failed generating random number");
-        
-        if proxy_kv_str.len() == 0 {
-            console_log!("getting proxy kv from github...");
-            let req = Fetch::Url(Url::parse("https://raw.githubusercontent.com/FoolVPN-ID/Nautica/refs/heads/main/kvProxyList.json")?);
-            let mut res = req.send().await?;
-            if res.status_code() == 200 {
-                proxy_kv_str = res.text().await?.to_string();
-                kv.put("proxy_kv", &proxy_kv_str)?.expiration_ttl(60 * 60 * 24).execute().await?; // 24 hours
-            } else {
-                return Err(Error::from(format!("error getting proxy kv: {}", res.status_code())));
+async fn tunnel(req: Request, mut cx: RouteContext<Config>, protocol: Protocol) -> Result<Response> {
+    let mut override_pool: Option<Vec<ProxyEntry>> = None;
+    let mut sticky_override: Option<String> = None;
+    if let Ok(url) = req.url() {
+        for (key, value) in url.query_pairs() {
+            match key.as_ref() {
+                "proxyip" => override_pool = Some(parse_proxyip_pool(&value)),
+                "sid" => sticky_override = Some(value.into_owned()),
+                _ => {}
             }
         }
-        
-        let proxy_kv: HashMap<String, Vec<String>> = serde_json::from_str(&proxy_kv_str)?;
-        
-        // select random KV ID
-        let kv_index = (rand_buf[0] as usize) % kvid_list.len();
-        proxyip = kvid_list[kv_index].clone();
-        
-        // select random proxy ip
-        let proxyip_index = (rand_buf[0] as usize) % proxy_kv[&proxyip].len();
-        proxyip = proxy_kv[&proxyip][proxyip_index].clone().replace(":", "-");
+    }
+
+    let default_pool = cx.data.proxy_pool.as_slice();
+    let pool: &[ProxyEntry] = match &override_pool {
+        Some(p) => p.as_slice(),
+        None => default_pool,
+    };
+
+    let sticky_id = sticky_override.unwrap_or_else(|| client_ip(&req));
+    let sticky_key = format!("{}:{}", sticky_id, protocol_tag(protocol));
+
+    let picked = pick_sticky(pool, &sticky_key).cloned();
+    if let Some(entry) = picked {
+        cx.data.proxy_type = entry.proxy_type;
+        cx.data.proxy_addr = entry.addr;
+        cx.data.proxy_port = entry.port;
+        cx.data.proxy_credentials = entry.credentials;
     }
 
     let upgrade = req.headers().get("Upgrade")?.unwrap_or_default();
-    if upgrade == "websocket".to_string() && PROXYIP_PATTERN.is_match(&proxyip) {
-        if let Some((addr, port_str)) = proxyip.split_once('-') {
-            if let Ok(port) = port_str.parse() {
-                cx.data.proxy_addr = addr.to_string();
-                cx.data.proxy_port = port;
-            }
-        }
-        
+    if upgrade == "websocket".to_string() {
         let WebSocketPair { server, client } = WebSocketPair::new()?;
         server.accept()?;
     
         wasm_bindgen_futures::spawn_local(async move {
             let events = server.events().unwrap();
-            if let Err(e) = ProxyStream::new(cx.data, &server, events).process().await {
+            if let Err(e) = ProxyStream::new(cx.data, &server, events).process(protocol).await {
                 console_error!("[tunnel]: {}", e);
             }
         });
@@ -105,7 +115,34 @@ async fn tunnel(req: Request, mut cx: RouteContext<Config>) -> Result<Response> 
     } else {
         Response::from_html("hi from wasm!")
     }
+}
 
+fn client_ip(req: &Request) -> String {
+    req.headers()
+        .get("CF-Connecting-IP")
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+fn protocol_tag(protocol: Protocol) -> &'static str {
+    match protocol {
+        Protocol::Vless => "vless",
+        Protocol::Vmess => "vmess",
+        Protocol::Trojan => "trojan",
+    }
+}
+
+async fn tunnel_vless(req: Request, cx: RouteContext<Config>) -> Result<Response> {
+    tunnel(req, cx, Protocol::Vless).await
+}
+
+async fn tunnel_vmess(req: Request, cx: RouteContext<Config>) -> Result<Response> {
+    tunnel(req, cx, Protocol::Vmess).await
+}
+
+async fn tunnel_trojan(req: Request, cx: RouteContext<Config>) -> Result<Response> {
+    tunnel(req, cx, Protocol::Trojan).await
 }
 
 fn link(_: Request, cx: RouteContext<Config>) -> Result<Response> {
@@ -117,23 +154,22 @@ fn link(_: Request, cx: RouteContext<Config>) -> Result<Response> {
             "ps": "siren vmess",
             "v": "2",
             "add": host,
-            "port": "80",
+            "port": "443",
             "id": uuid,
             "aid": "0",
             "scy": "zero",
             "net": "ws",
             "type": "none",
             "host": host,
-            "path": "/KR",
-            "tls": "",
-            "sni": "",
+            "path": "/vmess",
+            "tls": "tls",
+            "sni": host,
             "alpn": ""}
         );
         format!("vmess://{}", URL_SAFE.encode(config.to_string()))
     };
-    let vless_link = format!("vless://{uuid}@{host}:443?encryption=none&type=ws&host={host}&path=%2FKR&security=tls&sni={host}#siren vless");
-    let trojan_link = format!("trojan://{uuid}@{host}:443?encryption=none&type=ws&host={host}&path=%2FKR&security=tls&sni={host}#siren trojan");
-    let ss_link = format!("ss://{}@{host}:443?plugin=v2ray-plugin%3Btls%3Bmux%3D0%3Bmode%3Dwebsocket%3Bpath%3D%2FKR%3Bhost%3D{host}#siren ss", URL_SAFE.encode(format!("none:{uuid}")));
-    
-    Response::from_body(ResponseBody::Body(format!("{vmess_link}\n{vless_link}\n{trojan_link}\n{ss_link}").into()))
+    let vless_link = format!("vless://{uuid}@{host}:443?encryption=none&type=ws&host={host}&path=%2Fvless&security=tls&sni={host}#siren vless");
+    let trojan_link = format!("trojan://{uuid}@{host}:443?encryption=none&type=ws&host={host}&path=%2Ftrojan&security=tls&sni={host}#siren trojan");
+
+    Response::from_body(ResponseBody::Body(format!("{vmess_link}\n{vless_link}\n{trojan_link}").into()))
 }
