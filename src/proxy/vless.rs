@@ -16,8 +16,8 @@ impl <'a> ProxyStream<'a> {
         
         // read protobuf
         let m_len = self.read_u8().await?;
-        let mut protobuf = vec![0u8; m_len as _];
-        self.read_exact(&mut protobuf).await?;
+        let mut protobuf = [0u8; 255];
+        self.read_exact(&mut protobuf[..m_len as usize]).await?;
 
         // read instruction
         let network_type = self.read_u8().await?;
@@ -28,17 +28,10 @@ impl <'a> ProxyStream<'a> {
         let remote_addr = parse_addr(self).await?;
 
         if is_tcp {
-            let addr_pool = [
-                (remote_addr.clone(), remote_port),
-                (self.config.proxy_addr.clone(), self.config.proxy_port)
-            ];
-
             // send header
             self.write(&[0u8; 2]).await?;
-            for (target_addr, target_port) in addr_pool {
-                if let Err(e) = self.handle_tcp_outbound(target_addr, target_port).await {
-                    console_error!("error handling tcp: {}", e)
-                }
+            if let Err(e) = self.handle_tcp_outbound(remote_addr, remote_port).await {
+                console_error!("error handling tcp: {}", e)
             }
         } else {
             if let Err(e) = self.handle_udp_outbound().await {
