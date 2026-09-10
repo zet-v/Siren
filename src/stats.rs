@@ -2,42 +2,66 @@ use worker::*;
 
 #[durable_object]
 pub struct Stats {
-    state: State,
+    sql: SqlStorage,
 }
 
 impl DurableObject for Stats {
     fn new(state: State, _env: Env) -> Self {
-        Self { state }
+        let sql = state.storage().sql();
+
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS stats (
+                id INTEGER PRIMARY KEY,
+                first_seen INTEGER NOT NULL,
+                up_bytes INTEGER NOT NULL,
+                down_bytes INTEGER NOT NULL
+            );",
+            None,
+        )
+        .expect("create stats table");
+
+        let now = Date::now().as_millis() as i64;
+        sql.exec(
+            "INSERT OR IGNORE INTO stats (id, first_seen, up_bytes, down_bytes) VALUES (1, ?, 0, 0);",
+            vec![now.into()],
+        )
+        .expect("seed stats row");
+
+        Self { sql }
     }
 
     async fn fetch(&self, req: Request) -> Result<Response> {
         let url = req.url()?;
 
         match url.path() {
-            "/stats" => self.get_stats().await,
-            "/report" => self.report(&url).await,
+            "/stats" => self.get_stats(),
+            "/report" => self.report(&url),
             _ => Response::ok("not found"),
         }
     }
 }
 
 impl Stats {
-    async fn get_stats(&self) -> Result<Response> {
-        let storage = self.state.storage();
+    fn get_stats(&self) -> Result<Response> {
+        #[derive(serde::Deserialize)]
+        struct Row {
+            first_seen: i64,
+            up_bytes: i64,
+            down_bytes: i64,
+        }
 
-        let first_seen: u64 = match storage.get::<u64>("first_seen").await {
-            Ok(Some(v)) => v,
-            _ => {
-                let now = Date::now().as_millis();
-                storage.put("first_seen", now).await?;
-                now
-            }
+        let rows: Vec<Row> = self
+            .sql
+            .exec("SELECT first_seen, up_bytes, down_bytes FROM stats WHERE id = 1;", None)?
+            .to_array()?;
+
+        let now = Date::now().as_millis() as i64;
+        let (first_seen, up_bytes, down_bytes) = match rows.into_iter().next() {
+            Some(r) => (r.first_seen, r.up_bytes, r.down_bytes),
+            None => (now, 0, 0),
         };
-        let up_bytes: u64 = storage.get::<u64>("up_bytes").await.ok().flatten().unwrap_or(0);
-        let down_bytes: u64 = storage.get::<u64>("down_bytes").await.ok().flatten().unwrap_or(0);
 
-        let now = Date::now().as_millis();
-        let uptime_seconds = now.saturating_sub(first_seen) / 1000;
+        let uptime_seconds = (now - first_seen).max(0) / 1000;
 
         let body = serde_json::json!({
             "uptime_seconds": uptime_seconds,
@@ -50,9 +74,9 @@ impl Stats {
         Response::from_body(ResponseBody::Body(body.into()))
     }
 
-    async fn report(&self, url: &Url) -> Result<Response> {
-        let mut up: u64 = 0;
-        let mut down: u64 = 0;
+    fn report(&self, url: &Url) -> Result<Response> {
+        let mut up: i64 = 0;
+        let mut down: i64 = 0;
         for (key, value) in url.query_pairs() {
             match key.as_ref() {
                 "up" => up = value.parse().unwrap_or(0),
@@ -61,12 +85,10 @@ impl Stats {
             }
         }
 
-        let storage = self.state.storage();
-        let up_bytes: u64 = storage.get::<u64>("up_bytes").await.ok().flatten().unwrap_or(0);
-        let down_bytes: u64 = storage.get::<u64>("down_bytes").await.ok().flatten().unwrap_or(0);
-
-        storage.put("up_bytes", up_bytes.saturating_add(up)).await?;
-        storage.put("down_bytes", down_bytes.saturating_add(down)).await?;
+        self.sql.exec(
+            "UPDATE stats SET up_bytes = up_bytes + ?, down_bytes = down_bytes + ? WHERE id = 1;",
+            vec![up.into(), down.into()],
+        )?;
 
         Response::ok("ok")
     }
