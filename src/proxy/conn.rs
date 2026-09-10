@@ -90,7 +90,7 @@ impl<'a> ProxyStream<'a> {
     }
 
     async fn dial(addr: &str, port: u16) -> Result<Socket> {
-        let mut socket = Socket::builder()
+        let socket = Socket::builder()
             .connect(addr, port)
             .map_err(|e| Error::RustError(e.to_string()))?;
 
