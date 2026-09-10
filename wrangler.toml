@@ -4,10 +4,10 @@ compatibility_date = "2024-05-23"
 minify = true
 
 [build]
-command = "cargo install worker-build@0.8.5 && worker-build --release"
+command = "cargo install worker-build@0.8.5 && worker-build --release --panic-unwind"
 
 [env.dev]
-build = { command = "cargo install worker-build@0.8.5 && worker-build --dev" }
+build = { command = "cargo install worker-build@0.8.5 && worker-build --dev --panic-unwind" }
 
 [[durable_objects.bindings]]
 name = "DurableObject"
