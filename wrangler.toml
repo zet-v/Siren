@@ -15,7 +15,7 @@ class_name = "Stats"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["Stats"]
+new_sqlite_classes = ["Stats"]
 
 [[routes]]
 pattern = "siren.mendutmendut.web.id"
