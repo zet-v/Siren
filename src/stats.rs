@@ -5,7 +5,6 @@ pub struct Stats {
     state: State,
 }
 
-#[durable_object]
 impl DurableObject for Stats {
     fn new(state: State, _env: Env) -> Self {
         Self { state }
@@ -27,15 +26,15 @@ impl Stats {
         let storage = self.state.storage();
 
         let first_seen: u64 = match storage.get::<u64>("first_seen").await {
-            Ok(v) => v,
-            Err(_) => {
+            Ok(Some(v)) => v,
+            _ => {
                 let now = Date::now().as_millis();
                 storage.put("first_seen", now).await?;
                 now
             }
         };
-        let up_bytes: u64 = storage.get::<u64>("up_bytes").await.unwrap_or(0);
-        let down_bytes: u64 = storage.get::<u64>("down_bytes").await.unwrap_or(0);
+        let up_bytes: u64 = storage.get::<u64>("up_bytes").await.ok().flatten().unwrap_or(0);
+        let down_bytes: u64 = storage.get::<u64>("down_bytes").await.ok().flatten().unwrap_or(0);
 
         let now = Date::now().as_millis();
         let uptime_seconds = now.saturating_sub(first_seen) / 1000;
@@ -63,8 +62,8 @@ impl Stats {
         }
 
         let storage = self.state.storage();
-        let up_bytes: u64 = storage.get::<u64>("up_bytes").await.unwrap_or(0);
-        let down_bytes: u64 = storage.get::<u64>("down_bytes").await.unwrap_or(0);
+        let up_bytes: u64 = storage.get::<u64>("up_bytes").await.ok().flatten().unwrap_or(0);
+        let down_bytes: u64 = storage.get::<u64>("down_bytes").await.ok().flatten().unwrap_or(0);
 
         storage.put("up_bytes", up_bytes.saturating_add(up)).await?;
         storage.put("down_bytes", down_bytes.saturating_add(down)).await?;
